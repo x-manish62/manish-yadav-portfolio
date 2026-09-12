@@ -3,427 +3,404 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const nodemailer = require('nodemailer');
 const mysql = require('mysql2/promise');
 
 const app = express();
 
-// ======================================================
-// BASIC CONFIGURATION
-// ======================================================
-
 const PORT = process.env.PORT || 3000;
 
 const ROOT = path.join(__dirname, '..');
-const PUBLIC_DIR = path.join(ROOT, 'public');
-
 const DATA_DIR = path.join(ROOT, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'submissions.json');
+const DATA = path.join(DATA_DIR, 'submissions.json');
 
-// ======================================================
+// Make sure data folder exists
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+
+// ===============================
 // MIDDLEWARE
-// ======================================================
+// ===============================
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.use(express.static(PUBLIC_DIR));
+app.use(
+    express.static(
+        path.join(ROOT, 'public')
+    )
+);
 
-// ======================================================
-// LOCAL DATA STORAGE
-// ======================================================
 
-function ensureDataStorage() {
+// ===============================
+// LOCAL JSON STORAGE
+// ===============================
+
+function safeRead() {
     try {
-        if (!fs.existsSync(DATA_DIR)) {
-            fs.mkdirSync(DATA_DIR, { recursive: true });
-        }
-
-        if (!fs.existsSync(DATA_FILE)) {
-            fs.writeFileSync(DATA_FILE, '[]', 'utf8');
-        }
-
-        return true;
-    } catch (error) {
-        console.error('DATA STORAGE ERROR:', error);
-        return false;
-    }
-}
-
-function readSubmissions() {
-    try {
-        ensureDataStorage();
-
-        const fileContent = fs.readFileSync(
-            DATA_FILE,
-            'utf8'
-        );
-
-        if (!fileContent.trim()) {
+        if (!fs.existsSync(DATA)) {
             return [];
         }
 
-        const data = JSON.parse(fileContent);
-
-        return Array.isArray(data) ? data : [];
+        return JSON.parse(
+            fs.readFileSync(DATA, 'utf8') || '[]'
+        );
     } catch (error) {
-        console.error('READ SUBMISSIONS ERROR:', error);
+        console.error(
+            'Error reading submissions:',
+            error
+        );
+
         return [];
     }
 }
 
-function writeSubmissions(items) {
+
+function safeWrite(items) {
     try {
-        ensureDataStorage();
+        fs.mkdirSync(DATA_DIR, {
+            recursive: true
+        });
 
         fs.writeFileSync(
-            DATA_FILE,
-            JSON.stringify(items, null, 2),
-            'utf8'
+            DATA,
+            JSON.stringify(items, null, 2)
+        );
+    } catch (error) {
+        console.error(
+            'Error writing submissions:',
+            error
         );
 
-        return true;
-    } catch (error) {
-        console.error('WRITE SUBMISSIONS ERROR:', error);
-        return false;
+        throw error;
     }
 }
 
-// ======================================================
-// MYSQL DATABASE - OPTIONAL
-// ======================================================
 
-let dbPool = null;
+// ===============================
+// MYSQL DATABASE
+// ===============================
 
-async function getDatabase() {
-    if (dbPool) {
-        return dbPool;
+let pool = null;
+
+async function db() {
+
+    if (pool) {
+        return pool;
     }
 
     if (!process.env.DB_HOST) {
         return null;
     }
 
-    try {
-        dbPool = mysql.createPool({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT || 3306),
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            database:
-                process.env.DB_NAME ||
-                'manish_portfolio',
-            connectionLimit: 5
-        });
+    pool = mysql.createPool({
+        host: process.env.DB_HOST,
 
-        await dbPool.query(`
-            CREATE TABLE IF NOT EXISTS submissions (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                type VARCHAR(30) NOT NULL,
-                created_at DATETIME NOT NULL,
-                payload JSON NOT NULL
-            )
-        `);
+        port: Number(
+            process.env.DB_PORT || 3306
+        ),
 
-        console.log('MySQL connected successfully.');
+        user: process.env.DB_USER,
 
-        return dbPool;
-    } catch (error) {
-        console.error(
-            'MYSQL CONNECTION ERROR:',
-            error.message
-        );
+        password: process.env.DB_PASSWORD,
 
-        dbPool = null;
+        database:
+            process.env.DB_NAME ||
+            'manish_portfolio',
 
-        return null;
-    }
+        connectionLimit: 5
+    });
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS submissions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            type VARCHAR(30),
+            created_at DATETIME,
+            payload JSON
+        )
+    `);
+
+    return pool;
 }
 
-// ======================================================
-// SAVE SUBMISSION
-// ======================================================
 
-async function saveSubmission(type, data) {
+// ===============================
+// SAVE SUBMISSION
+// ===============================
+
+async function saveSubmission(
+    type,
+    data
+) {
+
     const record = {
         id: Date.now().toString(),
+
         type,
-        createdAt: new Date().toISOString(),
+
+        createdAt:
+            new Date().toISOString(),
+
         data
     };
 
-    // ------------------------------
-    // Save to JSON
-    // ------------------------------
 
-    const submissions = readSubmissions();
+    // Save in JSON
+    const items = safeRead();
 
-    submissions.unshift(record);
+    items.unshift(record);
 
-    const saved = writeSubmissions(
-        submissions
-    );
+    safeWrite(items);
 
-    if (!saved) {
-        throw new Error(
-            'Could not write submission data.'
+
+    // Save in MySQL if configured
+    const p = await db();
+
+    if (p) {
+
+        await p.query(
+            `
+            INSERT INTO submissions
+            (
+                type,
+                created_at,
+                payload
+            )
+            VALUES (?, ?, ?)
+            `,
+            [
+                type,
+                new Date(),
+                JSON.stringify(data)
+            ]
         );
     }
 
-    // ------------------------------
-    // Optional MySQL
-    // ------------------------------
-
-    const database = await getDatabase();
-
-    if (database) {
-        try {
-            await database.query(
-                `
-                INSERT INTO submissions
-                (type, created_at, payload)
-                VALUES (?, ?, ?)
-                `,
-                [
-                    type,
-                    new Date(),
-                    JSON.stringify(data)
-                ]
-            );
-
-            console.log(
-                `Saved ${type} submission to MySQL.`
-            );
-        } catch (error) {
-            console.error(
-                'MYSQL SAVE ERROR:',
-                error.message
-            );
-        }
-    }
-
-    console.log(
-        `Saved ${type} submission:`,
-        record.id
-    );
 
     return record;
 }
 
-// ======================================================
-// CREATE SMTP TRANSPORTER
-// ======================================================
 
-function createTransporter(port) {
-    return nodemailer.createTransport({
-        host:
-            process.env.SMTP_HOST ||
-            'smtp.gmail.com',
+// ===============================
+// BREVO EMAIL
+// ===============================
 
-        port,
+async function notify(
+    type,
+    data
+) {
 
-        secure: port === 465,
+    // Check Brevo configuration
+    if (
+        !process.env.BREVO_API_KEY ||
+        !process.env.BREVO_SENDER_EMAIL ||
+        !process.env.NOTIFY_EMAIL
+    ) {
 
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        },
-
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 10000
-    });
-}
-
-// ======================================================
-// SEND EMAIL
-// ======================================================
-
-async function sendEmail(type, data) {
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-
-    if (!smtpHost || !smtpUser || !smtpPass) {
-        console.error(
-            'SMTP ERROR: SMTP_HOST, SMTP_USER or SMTP_PASS is missing.'
+        console.log(
+            'Brevo environment variables are missing.'
         );
 
         return false;
     }
 
-    const recipient =
-        process.env.NOTIFY_EMAIL ||
-        smtpUser;
 
-    const sender =
-        process.env.SMTP_FROM ||
-        smtpUser;
-
+    // Remove honeypot field
     const lines = Object.entries(data)
-        .filter(([key]) => key !== 'website')
+
+        .filter(
+            ([key]) =>
+                key !== 'website'
+        )
+
         .map(
             ([key, value]) =>
                 `${key}: ${value}`
         )
+
         .join('\n');
 
-    const mailOptions = {
-        from: sender,
 
-        to: recipient,
+    const subject =
+        `Portfolio ${type}: ${
+            data.name ||
+            'New submission'
+        }`;
 
-        replyTo:
-            data.email || undefined,
 
-        subject:
-            `Portfolio ${type}: ${
-                data.name ||
-                'New submission'
-            }`,
+    const textContent =
+        `New ${type} submission
+from Manish Yadav Portfolio.
 
-        text:
-            `New ${type} submission from Manish Yadav Portfolio.\n\n` +
-            `${lines}\n\n` +
-            `Submitted at: ${new Date().toISOString()}`
-    };
+--------------------------------
 
-    // ==================================================
-    // TRY SMTP PORT 465
-    // ==================================================
+${lines}
+
+--------------------------------
+
+This message was sent from
+your portfolio website.`;
+
+
 
     try {
+
+        const response =
+            await fetch(
+                'https://api.brevo.com/v3/smtp/email',
+                {
+                    method: 'POST',
+
+                    headers: {
+                        'accept':
+                            'application/json',
+
+                        'api-key':
+                            process.env.BREVO_API_KEY,
+
+                        'content-type':
+                            'application/json'
+                    },
+
+                    body: JSON.stringify({
+
+                        sender: {
+                            name:
+                                'Manish Yadav Portfolio',
+
+                            email:
+                                process.env
+                                    .BREVO_SENDER_EMAIL
+                        },
+
+                        to: [
+                            {
+                                email:
+                                    process.env
+                                        .NOTIFY_EMAIL,
+
+                                name:
+                                    'Manish Yadav'
+                            }
+                        ],
+
+                        subject,
+
+                        textContent
+                    })
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            console.error(
+                'Brevo API Error:',
+                result
+            );
+
+            return false;
+        }
+
+
         console.log(
-            'Trying Gmail SMTP port 465...'
-        );
-
-        const transporter465 =
-            createTransporter(465);
-
-        await transporter465.sendMail(
-            mailOptions
-        );
-
-        console.log(
-            'EMAIL SENT SUCCESSFULLY using port 465.'
+            'Brevo email sent successfully:',
+            result
         );
 
         return true;
-    } catch (error465) {
+
+    } catch (error) {
+
         console.error(
-            'SMTP 465 FAILED:',
-            error465.message
+            'Brevo request failed:',
+            error
         );
+
+        return false;
     }
-
-    // ==================================================
-    // TRY SMTP PORT 587
-    // ==================================================
-
-    try {
-        console.log(
-            'Trying Gmail SMTP port 587...'
-        );
-
-        const transporter587 =
-            createTransporter(587);
-
-        await transporter587.sendMail(
-            mailOptions
-        );
-
-        console.log(
-            'EMAIL SENT SUCCESSFULLY using port 587.'
-        );
-
-        return true;
-    } catch (error587) {
-        console.error(
-            'SMTP 587 FAILED:',
-            error587.message
-        );
-    }
-
-    console.error(
-        'EMAIL FAILED: Both Gmail SMTP ports failed.'
-    );
-
-    return false;
 }
 
-// ======================================================
-// ANTI-SPAM VALIDATION
-// ======================================================
 
-function validateRequest(req, res, next) {
-    if (
-        req.body &&
-        req.body.website
-    ) {
+// ===============================
+// SPAM VALIDATION
+// ===============================
+
+function validate(
+    req,
+    res,
+    next
+) {
+
+    if (req.body.website) {
+
         return res.status(400).json({
-            success: false,
-            message: 'Spam detected.'
+            message:
+                'Spam detected.'
         });
     }
 
     next();
 }
 
-// ======================================================
+
+// ===============================
 // CONTACT FORM
-// ======================================================
+// ===============================
 
 app.post(
     '/api/contact',
-    validateRequest,
+    validate,
     async (req, res) => {
+
         try {
-            const data = req.body || {};
 
-            // Save first
-            const record =
-                await saveSubmission(
+            const data = req.body;
+
+
+            // Save submission
+            await saveSubmission(
+                'contact',
+                data
+            );
+
+
+            // Send email
+            const emailed =
+                await notify(
                     'contact',
                     data
                 );
 
-            // Email second
-            const emailSent =
-                await sendEmail(
-                    'contact',
-                    data
-                );
 
-            if (emailSent) {
-                return res.status(200).json({
-                    success: true,
-                    saved: true,
-                    emailed: true,
-                    id: record.id,
+            if (emailed) {
+
+                return res.json({
                     message:
                         'Message sent successfully. Email notification delivered.'
                 });
+
             }
 
-            return res.status(200).json({
-                success: true,
-                saved: true,
-                emailed: false,
-                id: record.id,
+
+            return res.json({
                 message:
-                    'Message sent successfully. Email notification is currently unavailable.'
+                    'Message saved, but email notification could not be delivered.'
             });
 
+
         } catch (error) {
+
             console.error(
-                'CONTACT FORM ERROR:',
+                'Contact error:',
                 error
             );
 
+
             return res.status(500).json({
-                success: false,
-                saved: false,
-                emailed: false,
                 message:
                     'Could not save the message.'
             });
@@ -431,59 +408,61 @@ app.post(
     }
 );
 
-// ======================================================
-// HIRE FORM
-// ======================================================
+
+// ===============================
+// HIRE ME FORM
+// ===============================
 
 app.post(
     '/api/hire',
-    validateRequest,
+    validate,
     async (req, res) => {
+
         try {
-            const data = req.body || {};
 
-            const record =
-                await saveSubmission(
+            const data = req.body;
+
+
+            // Save hiring request
+            await saveSubmission(
+                'hire',
+                data
+            );
+
+
+            // Send email
+            const emailed =
+                await notify(
                     'hire',
                     data
                 );
 
-            const emailSent =
-                await sendEmail(
-                    'hire',
-                    data
-                );
 
-            if (emailSent) {
-                return res.status(200).json({
-                    success: true,
-                    saved: true,
-                    emailed: true,
-                    id: record.id,
+            if (emailed) {
+
+                return res.json({
                     message:
                         'Hiring request sent successfully. Email notification delivered.'
                 });
+
             }
 
-            return res.status(200).json({
-                success: true,
-                saved: true,
-                emailed: false,
-                id: record.id,
+
+            return res.json({
                 message:
-                    'Hiring request saved successfully. Email notification is currently unavailable.'
+                    'Hiring request saved, but email notification could not be delivered.'
             });
 
+
         } catch (error) {
+
             console.error(
-                'HIRE FORM ERROR:',
+                'Hire error:',
                 error
             );
 
+
             return res.status(500).json({
-                success: false,
-                saved: false,
-                emailed: false,
                 message:
                     'Could not save the hiring request.'
             });
@@ -491,83 +470,95 @@ app.post(
     }
 );
 
-// ======================================================
+
+// ===============================
 // ADMIN SUBMISSIONS
-// ======================================================
+// ===============================
 
 app.get(
     '/api/admin/submissions',
     async (req, res) => {
+
+        if (
+            !process.env.ADMIN_KEY ||
+            req.query.key !==
+                process.env.ADMIN_KEY
+        ) {
+
+            return res.status(401).json({
+                message:
+                    'Invalid admin key.'
+            });
+        }
+
+
         try {
-            const adminKey =
-                process.env.ADMIN_KEY;
 
-            if (
-                !adminKey ||
-                req.query.key !== adminKey
-            ) {
-                return res.status(401).json({
-                    success: false,
-                    message:
-                        'Invalid admin key.'
-                });
-            }
+            const p = await db();
 
-            const database =
-                await getDatabase();
 
-            if (database) {
-                try {
-                    const [rows] =
-                        await database.query(`
-                            SELECT *
-                            FROM submissions
-                            ORDER BY created_at DESC
-                            LIMIT 200
-                        `);
+            // MySQL available
+            if (p) {
 
-                    return res.json({
-                        success: true,
+                const [rows] =
+                    await p.query(
+                        `
+                        SELECT *
+                        FROM submissions
+                        ORDER BY created_at DESC
+                        LIMIT 200
+                        `
+                    );
 
-                        items: rows.map(
-                            row => ({
-                                id: row.id,
-                                type: row.type,
+
+                return res.json({
+                    items:
+                        rows.map(
+                            (row) => ({
+
+                                id:
+                                    row.id,
+
+                                type:
+                                    row.type,
+
                                 createdAt:
                                     row.created_at,
+
                                 data:
                                     typeof row.payload ===
                                     'string'
+
                                         ? JSON.parse(
-                                            row.payload
-                                        )
+                                              row.payload
+                                          )
+
                                         : row.payload
                             })
                         )
-                    });
-                } catch (error) {
-                    console.error(
-                        'ADMIN MYSQL ERROR:',
-                        error.message
-                    );
-                }
+                });
             }
 
+
+            // JSON storage
             return res.json({
-                success: true,
                 items:
-                    readSubmissions()
-                        .slice(0, 200)
+                    safeRead().slice(
+                        0,
+                        200
+                    )
             });
 
+
         } catch (error) {
+
             console.error(
-                'ADMIN API ERROR:',
+                'Admin error:',
                 error
             );
 
+
             return res.status(500).json({
-                success: false,
                 message:
                     'Could not load submissions.'
             });
@@ -575,39 +566,41 @@ app.get(
     }
 );
 
-// ======================================================
+
+// ===============================
 // HEALTH CHECK
-// ======================================================
+// ===============================
 
 app.get(
     '/health',
     (req, res) => {
+
         res.json({
-            success: true,
             ok: true,
+
             service:
                 'Manish Yadav Portfolio',
-            smtpConfigured:
-                Boolean(
-                    process.env.SMTP_HOST &&
-                    process.env.SMTP_USER &&
-                    process.env.SMTP_PASS
-                ),
-            timestamp:
-                new Date().toISOString()
+
+            email:
+                process.env
+                    .BREVO_API_KEY
+                    ? 'configured'
+                    : 'not configured'
         });
     }
 );
 
-// ======================================================
+
+// ===============================
 // START SERVER
-// ======================================================
+// ===============================
 
 app.listen(
     PORT,
     () => {
+
         console.log(
-            `Manish Yadav Portfolio running on port ${PORT}`
+            `Portfolio running on port ${PORT}`
         );
     }
 );
