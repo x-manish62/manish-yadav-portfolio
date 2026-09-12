@@ -442,7 +442,7 @@ app.post(
 
                 return res.json({
                     message:
-                        'Hiring request sent successfully. Email notification delivered.'
+                        'Hiring request sent successfully.'
                 });
 
             }
