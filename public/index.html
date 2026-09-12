@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Manish Yadav — B.Tech IT student, full-stack developer, AI and data science learner.">
+  <title>Home | Manish Yadav</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <link rel="stylesheet" href="css/pages/home.css">
+</head>
+<body>
+  <canvas class="network" id="network" aria-hidden="true"></canvas>
+
+  <header class="topbar" id="site-header"></header>
+
+  <main>
+    <div class="container">
+      <section class="hero">
+        <div class="hero-grid">
+          <div class="reveal">
+            <span class="eyebrow">
+              <span class="dot"></span>
+              Open to internships, collaborations & selected opportunities
+            </span>
+
+            <h1>Manish <span class="gradient">Yadav.</span></h1>
+
+            <p class="hero-lead">
+              Founder @ MedTech · B.Tech Information Technology (3rd Year) · Full Stack Developer · AI & Data Science Learner · YouTube Creator.
+            </p>
+
+            <p class="hero-copy">
+              I build practical web products and AI-powered experiences while continuously exploring modern software, data and creator technology.
+            </p>
+
+            <div class="actions">
+              <a class="btn primary" href="projects.html">Explore Projects →</a>
+              <a class="btn" href="documents.html">Resume & CV</a>
+              <a class="btn" href="hire.html">Work With Me</a>
+            </div>
+
+            <div class="quick-links" aria-label="Professional links">
+              <a href="https://github.com/x-manish62" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://www.linkedin.com/in/manish-yadav-359412340" target="_blank" rel="noreferrer">LinkedIn</a>
+              <a href="mailto:yadavmanishmky2004@gmail.com">Email</a>
+              <a href="https://youtube.com/@officialytgrowth-01" target="_blank" rel="noreferrer">OfficialYTGrowth</a>
+              <a href="https://youtube.com/@raoshab362" target="_blank" rel="noreferrer">Vlog Channel</a>
+            </div>
+          </div>
+
+          <div class="hero-photo reveal d2">
+             <div class="profile-orbit">
+              <img src="assets/MY PHOTO.jpeg" alt="Manish Yadav profile photo">
+            </div>
+            <div class="profile-caption">Manish Yadav · Full Stack · AI/ML · Content</div> 
+
+            <!-- <div class="carousel" aria-label="Six-photo profile carousel">
+              <div class="carousel-window">
+                <div class="carousel-track">
+                  <div class="slide">
+                    <img src="assets/hero-1.jpg" alt="Manish Yadav photo 1">
+                    <span class="slide-label">01 / 06</span>
+                  </div>
+                  <div class="slide">
+                    <img src="assets/hero-2.jpg" alt="Manish Yadav photo 2">
+                    <span class="slide-label">02 / 06</span>
+                  </div>
+                  <div class="slide">
+                    <img src="assets/hero-3.jpg" alt="Manish Yadav photo 3">
+                    <span class="slide-label">03 / 06</span>
+                  </div>
+                  <div class="slide">
+                    <img src="assets/hero-4.jpg" alt="Manish Yadav photo 4">
+                    <span class="slide-label">04 / 06</span>
+                  </div>
+                  <div class="slide">
+                    <img src="assets/hero-5.jpg" alt="Manish Yadav photo 5">
+                    <span class="slide-label">05 / 06</span>
+                  </div>
+                  <div class="slide">
+                    <img src="assets/hero-6.jpg" alt="Manish Yadav photo 6">
+                    <span class="slide-label">06 / 06</span>
+                  </div>
+                </div>
+
+                <div class="carousel-ui">
+                  <button id="pause" type="button">Ⅱ</button>
+                  <button id="prev" type="button" aria-label="Previous image">←</button>
+                  <button id="next" type="button" aria-label="Next image">→</button>
+                </div>
+              </div> -->
+
+              <div class="carousel-meta">
+                <span id="carouselCounter">01 / 06</span>
+                <div class="carousel-dots" aria-label="Choose photo">
+                  <button class="carousel-dot active" data-slide="0" aria-label="Photo 1"></button>
+                  <button class="carousel-dot" data-slide="1" aria-label="Photo 2"></button>
+                  <button class="carousel-dot" data-slide="2" aria-label="Photo 3"></button>
+                  <button class="carousel-dot" data-slide="3" aria-label="Photo 4"></button>
+                  <button class="carousel-dot" data-slide="4" aria-label="Photo 5"></button>
+                  <button class="carousel-dot" data-slide="5" aria-label="Photo 6"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section home-access reveal d3">
+        <div class="section-title">
+          <div>
+            <h2>Quick professional access</h2>
+            <p>Clean entry points for recruiters, collaborators and visitors.</p>
+          </div>
+        </div>
+
+        <div class="card-grid">
+          <article class="card">
+            <div class="kicker">Work</div>
+            <h3>Projects</h3>
+            <p>Open each build on its own page with stack, role, work summary and links.</p>
+            <a class="btn small" href="projects.html">View projects →</a>
+          </article>
+
+          <article class="card">
+            <div class="kicker">Documents</div>
+            <h3>Resume & CV</h3>
+            <p>Separate downloads for Resume and CV, kept together on one clean documents page.</p>
+            <a class="btn small" href="documents.html">Open documents →</a>
+          </article>
+
+          <article class="card">
+            <div class="kicker">Opportunity</div>
+            <h3>Hiring</h3>
+            <p>A dedicated form keeps internship, full-time and collaboration requests separate from normal contact.</p>
+            <a class="btn small primary" href="hire.html">Open hiring form →</a>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer" id="site-footer"></footer>
+
+  <script src="js/common.js"></script>
+</body>
+</html>

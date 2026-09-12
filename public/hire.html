@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Hire Manish Yadav for internships, full-time roles, part-time work or collaborations.">
+  <title>Hire Me | Manish Yadav</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <link rel="stylesheet" href="css/pages/hire.css">
+</head>
+<body>
+  <canvas class="network" id="network" aria-hidden="true"></canvas>
+  <header class="topbar" id="site-header"></header>
+  <main>
+
+    <div class="container">
+      <div class="page-head reveal"><a class="back" href="index.html">← Back to Home</a><div class="kicker">Hire Me</div><h1>Have an opportunity? <span class="gradient">Let's talk.</span></h1><p>A structured hiring form for recruiters, founders and collaborators. It stays separate from normal Contact.</p></div>
+      <section class="card-grid two">
+        <article class="card reveal d2"><div class="kicker">Available for</div><div class="chips"><span class="chip">Internship</span><span class="chip">Full-time</span><span class="chip">Part-time</span><span class="chip">Project Collaboration</span><span class="chip">Freelance</span><span class="chip">General Inquiry</span></div><h2 style="margin-top:22px">What to include</h2><p>Share your company, role, preferred engagement type and a short description. This gives enough context to respond professionally.</p></article>
+        <article class="card reveal d3"><form class="form" data-endpoint="/api/hire" data-button="Send Hiring Request"><div class="form-row"><div class="field"><label for="hire-name">Your Name</label><input id="hire-name" name="name" required></div><div class="field"><label for="hire-company">Company</label><input id="hire-company" name="company" required></div></div><div class="form-row"><div class="field"><label for="hire-email">Company Email</label><input id="hire-email" type="email" name="email" required></div><div class="field"><label for="hire-role">Role / Position</label><input id="hire-role" name="role" required></div></div><div class="field"><label for="hire-type">Hiring For</label><select id="hire-type" name="hiringFor" required><option value="">Select an option</option><option>Internship</option><option>Full-time</option><option>Part-time</option><option>Project Collaboration</option><option>Freelance</option><option>General Inquiry</option></select></div><div class="field"><label for="hire-message">Opportunity Details</label><textarea id="hire-message" name="message" placeholder="Role details, timeline, expectations, links…" required></textarea></div><input class="hidden" name="website" tabindex="-1" autocomplete="off"><button class="btn primary" type="submit">Send Hiring Request</button><div class="form-status" aria-live="polite"></div></form></article>
+      </section>
+    </div>
+
+  </main>
+  <footer class="footer" id="site-footer"></footer>
+  <script src="js/common.js"></script>
+</body>
+</html>

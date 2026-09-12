@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Private portfolio submissions dashboard.">
+  <title>Admin | Manish Yadav</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <link rel="stylesheet" href="css/pages/admin.css">
+</head>
+<body>
+  <canvas class="network" id="network" aria-hidden="true"></canvas>
+  <header class="topbar" id="site-header"></header>
+  <main>
+
+    <div class="container"><div class="page-head"><div class="kicker">Admin</div><h1>Submissions <span class="gradient">dashboard.</span></h1><p>Enter the ADMIN_KEY configured in your server environment.</p></div><div class="card"><div class="form-row"><div class="field"><label for="admin-key">Admin Key</label><input id="admin-key" type="password"></div><div style="display:flex;align-items:end"><button class="btn primary" id="loadAdmin" type="button">Load Submissions</button></div></div><pre id="adminOutput" style="white-space:pre-wrap;overflow:auto;margin-top:18px;color:#475467"></pre></div></div><script>document.querySelector('#loadAdmin').addEventListener('click', async () => { const key=document.querySelector('#admin-key').value; const out=document.querySelector('#adminOutput'); out.textContent='Loading…'; try { const r=await fetch('/api/admin/submissions?key='+encodeURIComponent(key)); const d=await r.json(); if(!r.ok) throw new Error(d.message); out.textContent=JSON.stringify(d.items,null,2); } catch(e) { out.textContent=e.message; } });</script>
+  </main>
+  <footer class="footer" id="site-footer"></footer>
+  <script src="js/common.js"></script>
+</body>
+</html>

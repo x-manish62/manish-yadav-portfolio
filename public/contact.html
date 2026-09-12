@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Contact Manish Yadav.">
+  <title>Contact | Manish Yadav</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <link rel="stylesheet" href="css/pages/contact.css">
+</head>
+<body>
+  <canvas class="network" id="network" aria-hidden="true"></canvas>
+  <header class="topbar" id="site-header"></header>
+  <main>
+
+    <div class="container">
+      <div class="page-head reveal"><a class="back" href="index.html">← Back to Home</a><div class="kicker">Contact</div><h1>Let's connect <span class="gradient">directly.</span></h1><p>For a general message, feedback, question or collaboration discussion. Hiring has its own separate form.</p></div>
+      <section class="card-grid two">
+        <article class="card reveal d2"><div class="kicker">Direct details</div><div class="contact-list"><a class="contact-item" href="mailto:yadavmanishmky2004@gmail.com"><strong>Email</strong><span>yadavmanishmky2004@gmail.com</span></a><a class="contact-item" href="tel:+918707011362"><strong>Phone</strong><span>+91 8707011362</span></a><a class="contact-item" href="https://www.linkedin.com/in/manish-yadav-359412340" target="_blank" rel="noreferrer"><strong>LinkedIn</strong><span>Connect professionally</span></a><a class="contact-item" href="https://github.com/x-manish62" target="_blank" rel="noreferrer"><strong>GitHub</strong><span>Explore my code</span></a></div></article>
+        <article class="card reveal d3"><div class="kicker">Message</div><form class="form" data-endpoint="/api/contact" data-button="Send Message"><div class="form-row"><div class="field"><label for="contact-name">Name</label><input id="contact-name" name="name" required></div><div class="field"><label for="contact-email">Email</label><input id="contact-email" type="email" name="email" required></div></div><div class="field"><label for="contact-subject">Subject</label><input id="contact-subject" name="subject" required></div><div class="field"><label for="contact-message">Message</label><textarea id="contact-message" name="message" required></textarea></div><input class="hidden" name="website" tabindex="-1" autocomplete="off"><button class="btn primary" type="submit">Send Message</button><div class="form-status" aria-live="polite"></div></form></article>
+      </section>
+    </div>
+
+  </main>
+  <footer class="footer" id="site-footer"></footer>
+  <script src="js/common.js"></script>
+</body>
+</html>
