@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -10,447 +9,259 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, '..');
-const PUBLIC = path.join(ROOT, 'public');
-const DATA_DIR = path.join(ROOT, 'data');
-const DATA = path.join(DATA_DIR, 'submissions.json');
-
-// --------------------------------------------------
-// Middleware
-// --------------------------------------------------
+const DATA = path.join(ROOT, 'data', 'submissions.json');
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(PUBLIC));
-
-// --------------------------------------------------
-// Data Storage
-// --------------------------------------------------
-
-function ensureDataFile() {
-    try {
-        if (!fs.existsSync(DATA_DIR)) {
-            fs.mkdirSync(DATA_DIR, { recursive: true });
-        }
-
-        if (!fs.existsSync(DATA)) {
-            fs.writeFileSync(DATA, '[]', 'utf8');
-        }
-
-        return true;
-    } catch (error) {
-        console.error('Data initialization error:', error);
-        return false;
-    }
-}
+app.use(express.static(path.join(ROOT, 'public')));
 
 function safeRead() {
-    try {
-        ensureDataFile();
-
-        const content = fs.readFileSync(DATA, 'utf8');
-
-        if (!content.trim()) {
-            return [];
-        }
-
-        const parsed = JSON.parse(content);
-
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-        console.error('Read submissions error:', error);
-        return [];
-    }
+  try {
+    return JSON.parse(
+      fs.readFileSync(DATA, 'utf8') || '[]'
+    );
+  } catch {
+    return [];
+  }
 }
 
 function safeWrite(items) {
-    try {
-        ensureDataFile();
-
-        fs.writeFileSync(
-            DATA,
-            JSON.stringify(items, null, 2),
-            'utf8'
-        );
-
-        return true;
-    } catch (error) {
-        console.error('Write submissions error:', error);
-        return false;
-    }
+  fs.writeFileSync(
+    DATA,
+    JSON.stringify(items, null, 2)
+  );
 }
-
-// --------------------------------------------------
-// MySQL
-// --------------------------------------------------
 
 let pool = null;
 
-async function getDatabase() {
-    if (pool) {
-        return pool;
-    }
+async function db() {
+  if (pool) return pool;
 
-    if (!process.env.DB_HOST) {
-        return null;
-    }
+  if (process.env.DB_HOST) {
+    pool = mysql.createPool({
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT || 3306),
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME || 'manish_portfolio',
+      connectionLimit: 5
+    });
 
-    try {
-        pool = mysql.createPool({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT || 3306),
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            database: process.env.DB_NAME || 'manish_portfolio',
-            connectionLimit: 5
-        });
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS submissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        type VARCHAR(30),
+        created_at DATETIME,
+        payload JSON
+      )
+    `);
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS submissions (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                type VARCHAR(30) NOT NULL,
-                created_at DATETIME NOT NULL,
-                payload JSON NOT NULL
-            )
-        `);
+    return pool;
+  }
 
-        console.log('MySQL connected successfully.');
-
-        return pool;
-    } catch (error) {
-        console.error('MySQL connection error:', error);
-        pool = null;
-        return null;
-    }
+  return null;
 }
-
-// --------------------------------------------------
-// Save Submission
-// --------------------------------------------------
 
 async function saveSubmission(type, data) {
-    const record = {
-        id: Date.now().toString(),
-        type: type,
-        createdAt: new Date().toISOString(),
-        data: data
-    };
+  const record = {
+    id: Date.now().toString(),
+    type,
+    createdAt: new Date().toISOString(),
+    data
+  };
 
-    // Always try local JSON storage
-    const items = safeRead();
-    items.unshift(record);
+  const items = safeRead();
 
-    const saved = safeWrite(items);
+  items.unshift(record);
 
-    if (!saved) {
-        throw new Error('Could not write submission data.');
-    }
+  safeWrite(items);
 
-    // Optional MySQL storage
-    const database = await getDatabase();
+  const p = await db();
 
-    if (database) {
-        try {
-            await database.query(
-                `
-                INSERT INTO submissions
-                (type, created_at, payload)
-                VALUES (?, ?, ?)
-                `,
-                [
-                    type,
-                    new Date(),
-                    JSON.stringify(data)
-                ]
-            );
-        } catch (error) {
-            console.error('MySQL save error:', error);
-        }
-    }
+  if (p) {
+    await p.query(
+      'INSERT INTO submissions(type,created_at,payload) VALUES(?,?,?)',
+      [
+        type,
+        new Date(),
+        JSON.stringify(data)
+      ]
+    );
+  }
 
-    return record;
+  return record;
 }
 
-// --------------------------------------------------
-// Email Notification
-// --------------------------------------------------
-
 async function notify(type, data) {
-    const required = [
-        process.env.SMTP_HOST,
-        process.env.SMTP_USER,
-        process.env.SMTP_PASS
-    ];
+  if (
+    !process.env.SMTP_HOST ||
+    !process.env.SMTP_USER ||
+    !process.env.SMTP_PASS
+  ) {
+    return false;
+  }
 
-    if (required.some(value => !value)) {
-        console.warn('SMTP is not configured.');
-        return false;
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE) === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+
+  const lines = Object.entries(data)
+    .filter(([k]) => k !== 'website')
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to:
+      process.env.NOTIFY_EMAIL ||
+      'yadavmanishmky2004@gmail.com',
+    subject:
+      `Portfolio ${type}: ${
+        data.name || 'New submission'
+      }`,
+    text:
+      `New ${type} submission from Manish Yadav portfolio.\n\n${lines}`
+  });
+
+  return true;
+}
+
+function validate(req, res, next) {
+  if (req.body.website) {
+    return res.status(400).json({
+      message: 'Spam detected.'
+    });
+  }
+
+  next();
+}
+
+app.post(
+  '/api/contact',
+  validate,
+  async (req, res) => {
+    try {
+      const data = req.body;
+
+      await saveSubmission(
+        'contact',
+        data
+      );
+
+      const emailed = await notify(
+        'contact',
+        data
+      );
+
+      res.json({
+        message: emailed
+          ? 'Message sent. Email notification delivered.'
+          : 'Message saved. Configure SMTP in .env for email notifications.'
+      });
+    } catch (e) {
+      console.error(e);
+
+      res.status(500).json({
+        message: 'Could not save the message.'
+      });
+    }
+  }
+);
+
+app.post(
+  '/api/hire',
+  validate,
+  async (req, res) => {
+    try {
+      const data = req.body;
+
+      await saveSubmission(
+        'hire',
+        data
+      );
+
+      const emailed = await notify(
+        'hire',
+        data
+      );
+
+      res.json({
+        message: emailed
+          ? 'Hiring request sent. Email notification delivered.'
+          : 'Hiring request saved. Configure SMTP in .env for email notifications.'
+      });
+    } catch (e) {
+      console.error(e);
+
+      res.status(500).json({
+        message: 'Could not save the hiring request.'
+      });
+    }
+  }
+);
+
+app.get(
+  '/api/admin/submissions',
+  async (req, res) => {
+    if (
+      !process.env.ADMIN_KEY ||
+      req.query.key !== process.env.ADMIN_KEY
+    ) {
+      return res.status(401).json({
+        message: 'Invalid admin key.'
+      });
     }
 
     try {
-        const transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT || 587),
-            secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
+      const p = await db();
 
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS
-            }
+      if (p) {
+        const [rows] = await p.query(
+          'SELECT * FROM submissions ORDER BY created_at DESC LIMIT 200'
+        );
+
+        return res.json({
+          items: rows.map((r) => ({
+            id: r.id,
+            type: r.type,
+            createdAt: r.created_at,
+            data:
+              typeof r.payload === 'string'
+                ? JSON.parse(r.payload)
+                : r.payload
+          }))
         });
+      }
 
-        await transporter.verify();
-
-        const lines = Object.entries(data)
-            .filter(([key]) => key !== 'website')
-            .map(([key, value]) => `${key}: ${value}`)
-            .join('\n');
-
-        const recipient =
-            process.env.NOTIFY_EMAIL ||
-            process.env.SMTP_USER;
-
-        await transporter.sendMail({
-            from:
-                process.env.SMTP_FROM ||
-                process.env.SMTP_USER,
-
-            to: recipient,
-
-            replyTo: data.email || undefined,
-
-            subject:
-                `Portfolio ${type}: ${
-                    data.name || 'New submission'
-                }`,
-
-            text:
-                `New ${type} submission from Manish Yadav Portfolio.\n\n` +
-                `${lines}\n\n` +
-                `Submitted at: ${new Date().toISOString()}`
-        });
-
-        console.log(`Email notification sent for ${type}.`);
-
-        return true;
-    } catch (error) {
-        console.error('SMTP email error:', error);
-        return false;
+      res.json({
+        items: safeRead().slice(0, 200)
+      });
+    } catch (e) {
+      res.status(500).json({
+        message: 'Could not load submissions.'
+      });
     }
-}
-
-// --------------------------------------------------
-// Validation / Anti-Spam
-// --------------------------------------------------
-
-function validate(req, res, next) {
-    if (req.body && req.body.website) {
-        return res.status(400).json({
-            success: false,
-            message: 'Spam detected.'
-        });
-    }
-
-    next();
-}
-
-// --------------------------------------------------
-// Contact API
-// --------------------------------------------------
-
-app.post(
-    '/api/contact',
-    validate,
-    async (req, res) => {
-        try {
-            const data = req.body || {};
-
-            const record = await saveSubmission(
-                'contact',
-                data
-            );
-
-            const emailed = await notify(
-                'contact',
-                data
-            );
-
-            return res.status(200).json({
-                success: true,
-                saved: true,
-                emailed: emailed,
-                message: emailed
-                    ? 'Message sent successfully. Email notification delivered.'
-                    : 'Message sent successfully. Email notification is currently unavailable.',
-                id: record.id
-            });
-
-        } catch (error) {
-            console.error(
-                'CONTACT API ERROR:',
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                saved: false,
-                message:
-                    'Could not save the message.'
-            });
-        }
-    }
+  }
 );
-
-// --------------------------------------------------
-// Hire API
-// --------------------------------------------------
-
-app.post(
-    '/api/hire',
-    validate,
-    async (req, res) => {
-        try {
-            const data = req.body || {};
-
-            const record = await saveSubmission(
-                'hire',
-                data
-            );
-
-            const emailed = await notify(
-                'hire',
-                data
-            );
-
-            return res.status(200).json({
-                success: true,
-                saved: true,
-                emailed: emailed,
-                message: emailed
-                    ? 'Hiring request sent successfully. Email notification delivered.'
-                    : 'Hiring request saved successfully. Email notification is currently unavailable.',
-                id: record.id
-            });
-
-        } catch (error) {
-            console.error(
-                'HIRE API ERROR:',
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                saved: false,
-                message:
-                    'Could not save the hiring request.'
-            });
-        }
-    }
-);
-
-// --------------------------------------------------
-// Admin Submissions
-// --------------------------------------------------
 
 app.get(
-    '/api/admin/submissions',
-    async (req, res) => {
-        try {
-            const adminKey =
-                process.env.ADMIN_KEY;
-
-            if (
-                !adminKey ||
-                req.query.key !== adminKey
-            ) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Invalid admin key.'
-                });
-            }
-
-            const database =
-                await getDatabase();
-
-            if (database) {
-                try {
-                    const [rows] =
-                        await database.query(
-                            `
-                            SELECT *
-                            FROM submissions
-                            ORDER BY created_at DESC
-                            LIMIT 200
-                            `
-                        );
-
-                    return res.json({
-                        success: true,
-                        items: rows.map(row => ({
-                            id: row.id,
-                            type: row.type,
-                            createdAt:
-                                row.created_at,
-                            data:
-                                typeof row.payload === 'string'
-                                    ? JSON.parse(row.payload)
-                                    : row.payload
-                        }))
-                    });
-                } catch (error) {
-                    console.error(
-                        'Admin MySQL error:',
-                        error
-                    );
-                }
-            }
-
-            return res.json({
-                success: true,
-                items: safeRead().slice(0, 200)
-            });
-
-        } catch (error) {
-            console.error(
-                'Admin API error:',
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message:
-                    'Could not load submissions.'
-            });
-        }
-    }
+  '/health',
+  (req, res) =>
+    res.json({
+      ok: true
+    })
 );
-
-// --------------------------------------------------
-// Health Check
-// --------------------------------------------------
-
-app.get(
-    '/health',
-    (req, res) => {
-        res.json({
-            success: true,
-            ok: true,
-            service:
-                'Manish Yadav Portfolio',
-            timestamp:
-                new Date().toISOString()
-        });
-    }
-);
-
-// --------------------------------------------------
-// Start Server
-// --------------------------------------------------
 
 app.listen(
-    PORT,
-    () => {
-        console.log(
-            `Portfolio running on port ${PORT}`
-        );
-    }
+  PORT,
+  () =>
+    console.log(
+      `Portfolio running on http://localhost:${PORT}`
+    )
 );
