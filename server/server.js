@@ -8,75 +8,46 @@ const mysql = require('mysql2/promise');
 
 const app = express();
 
-/* ==================================================
-   BASIC CONFIGURATION
-================================================== */
-
 const PORT = process.env.PORT || 3000;
 const ROOT = path.join(__dirname, '..');
-
+const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'submissions.json');
+const DATA = path.join(DATA_DIR, 'submissions.json');
 
-/* ==================================================
-   CREATE DATA DIRECTORY
-================================================== */
+// --------------------------------------------------
+// Middleware
+// --------------------------------------------------
 
-try {
-    fs.mkdirSync(DATA_DIR, {
-        recursive: true
-    });
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(PUBLIC));
 
-    console.log('Data directory ready:', DATA_DIR);
-} catch (error) {
-    console.error(
-        'Could not create data directory:',
-        error
-    );
+// --------------------------------------------------
+// Data Storage
+// --------------------------------------------------
+
+function ensureDataFile() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+
+        if (!fs.existsSync(DATA)) {
+            fs.writeFileSync(DATA, '[]', 'utf8');
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Data initialization error:', error);
+        return false;
+    }
 }
-
-/* ==================================================
-   MIDDLEWARE
-================================================== */
-
-app.use(
-    express.json({
-        limit: '1mb'
-    })
-);
-
-app.use(
-    express.urlencoded({
-        extended: true
-    })
-);
-
-app.use(
-    express.static(
-        path.join(ROOT, 'public')
-    )
-);
-
-/* ==================================================
-   LOCAL JSON STORAGE
-================================================== */
 
 function safeRead() {
     try {
-        if (!fs.existsSync(DATA_FILE)) {
-            fs.writeFileSync(
-                DATA_FILE,
-                '[]',
-                'utf8'
-            );
+        ensureDataFile();
 
-            return [];
-        }
-
-        const content = fs.readFileSync(
-            DATA_FILE,
-            'utf8'
-        );
+        const content = fs.readFileSync(DATA, 'utf8');
 
         if (!content.trim()) {
             return [];
@@ -84,55 +55,33 @@ function safeRead() {
 
         const parsed = JSON.parse(content);
 
-        return Array.isArray(parsed)
-            ? parsed
-            : [];
+        return Array.isArray(parsed) ? parsed : [];
     } catch (error) {
-        console.error(
-            'Could not read submissions file:',
-            error
-        );
-
+        console.error('Read submissions error:', error);
         return [];
     }
 }
 
 function safeWrite(items) {
     try {
-        fs.mkdirSync(DATA_DIR, {
-            recursive: true
-        });
+        ensureDataFile();
 
         fs.writeFileSync(
-            DATA_FILE,
-            JSON.stringify(
-                items,
-                null,
-                2
-            ),
+            DATA,
+            JSON.stringify(items, null, 2),
             'utf8'
         );
 
         return true;
     } catch (error) {
-        console.error(
-            'Could not write submissions file:',
-            error
-        );
-
+        console.error('Write submissions error:', error);
         return false;
     }
 }
 
-/* ==================================================
-   IN-MEMORY BACKUP
-================================================== */
-
-let memorySubmissions = [];
-
-/* ==================================================
-   MYSQL CONNECTION
-================================================== */
+// --------------------------------------------------
+// MySQL
+// --------------------------------------------------
 
 let pool = null;
 
@@ -141,31 +90,17 @@ async function getDatabase() {
         return pool;
     }
 
-    if (
-        !process.env.DB_HOST ||
-        !process.env.DB_USER ||
-        !process.env.DB_PASSWORD
-    ) {
+    if (!process.env.DB_HOST) {
         return null;
     }
 
     try {
         pool = mysql.createPool({
             host: process.env.DB_HOST,
-
-            port: Number(
-                process.env.DB_PORT || 3306
-            ),
-
+            port: Number(process.env.DB_PORT || 3306),
             user: process.env.DB_USER,
-
-            password:
-                process.env.DB_PASSWORD,
-
-            database:
-                process.env.DB_NAME ||
-                'manish_portfolio',
-
+            password: process.env.DB_PASSWORD,
+            database: process.env.DB_NAME || 'manish_portfolio',
             connectionLimit: 5
         });
 
@@ -178,174 +113,97 @@ async function getDatabase() {
             )
         `);
 
-        console.log('MySQL database connected.');
+        console.log('MySQL connected successfully.');
 
         return pool;
     } catch (error) {
-        console.error(
-            'MySQL connection failed:',
-            error
-        );
-
+        console.error('MySQL connection error:', error);
         pool = null;
-
         return null;
     }
 }
 
-/* ==================================================
-   SAVE SUBMISSION
-================================================== */
+// --------------------------------------------------
+// Save Submission
+// --------------------------------------------------
 
-async function saveSubmission(
-    type,
-    data
-) {
+async function saveSubmission(type, data) {
     const record = {
         id: Date.now().toString(),
-
-        type,
-
-        createdAt:
-            new Date().toISOString(),
-
-        data
+        type: type,
+        createdAt: new Date().toISOString(),
+        data: data
     };
 
-    /*
-       Always keep an in-memory copy.
-       This prevents the form from failing
-       just because file storage is unavailable.
-    */
+    // Always try local JSON storage
+    const items = safeRead();
+    items.unshift(record);
 
-    memorySubmissions.unshift(record);
+    const saved = safeWrite(items);
 
-    /*
-       Try local JSON storage.
-       Failure here will NOT break the form.
-    */
-
-    const existing = safeRead();
-
-    existing.unshift(record);
-
-    const fileSaved =
-        safeWrite(existing);
-
-    if (!fileSaved) {
-        console.warn(
-            'Submission kept in memory because JSON storage failed.'
-        );
+    if (!saved) {
+        throw new Error('Could not write submission data.');
     }
 
-    /*
-       Try MySQL if configured.
-       Failure here will NOT break the form.
-    */
-
-    const database =
-        await getDatabase();
+    // Optional MySQL storage
+    const database = await getDatabase();
 
     if (database) {
         try {
             await database.query(
                 `
                 INSERT INTO submissions
-                (
-                    type,
-                    created_at,
-                    payload
-                )
+                (type, created_at, payload)
                 VALUES (?, ?, ?)
                 `,
                 [
                     type,
                     new Date(),
-
                     JSON.stringify(data)
                 ]
             );
-
-            console.log(
-                'Submission saved to MySQL.'
-            );
         } catch (error) {
-            console.error(
-                'MySQL save failed:',
-                error
-            );
+            console.error('MySQL save error:', error);
         }
     }
 
     return record;
 }
 
-/* ==================================================
-   EMAIL NOTIFICATION
-================================================== */
+// --------------------------------------------------
+// Email Notification
+// --------------------------------------------------
 
-async function notify(
-    type,
-    data
-) {
-    /*
-       SMTP not configured
-    */
+async function notify(type, data) {
+    const required = [
+        process.env.SMTP_HOST,
+        process.env.SMTP_USER,
+        process.env.SMTP_PASS
+    ];
 
-    if (
-        !process.env.SMTP_HOST ||
-        !process.env.SMTP_USER ||
-        !process.env.SMTP_PASS
-    ) {
-        console.warn(
-            'SMTP is not configured.'
-        );
-
+    if (required.some(value => !value)) {
+        console.warn('SMTP is not configured.');
         return false;
     }
 
     try {
-        const transporter =
-            nodemailer.createTransport({
-                host:
-                    process.env.SMTP_HOST,
+        const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT || 587),
+            secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
 
-                port: Number(
-                    process.env.SMTP_PORT ||
-                        587
-                ),
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS
+            }
+        });
 
-                secure:
-                    String(
-                        process.env.SMTP_SECURE
-                    ) === 'true',
+        await transporter.verify();
 
-                auth: {
-                    user:
-                        process.env.SMTP_USER,
-
-                    pass:
-                        process.env.SMTP_PASS
-                },
-
-                connectionTimeout: 10000,
-
-                greetingTimeout: 10000,
-
-                socketTimeout: 10000
-            });
-
-        const lines =
-            Object.entries(data)
-                .filter(
-                    ([key]) =>
-                        key !== 'website'
-                )
-                .map(
-                    ([key, value]) =>
-                        `${key}: ${value}`
-                )
-                .join('\n');
+        const lines = Object.entries(data)
+            .filter(([key]) => key !== 'website')
+            .map(([key, value]) => `${key}: ${value}`)
+            .join('\n');
 
         const recipient =
             process.env.NOTIFY_EMAIL ||
@@ -358,226 +216,157 @@ async function notify(
 
             to: recipient,
 
-            replyTo:
-                data.email ||
-                undefined,
+            replyTo: data.email || undefined,
 
             subject:
                 `Portfolio ${type}: ${
-                    data.name ||
-                    'New submission'
+                    data.name || 'New submission'
                 }`,
 
             text:
-                `New ${type} submission from Manish Yadav portfolio.
-
---------------------------------
-
-${lines}
-
---------------------------------
-
-This message was generated by the portfolio contact system.`
+                `New ${type} submission from Manish Yadav Portfolio.\n\n` +
+                `${lines}\n\n` +
+                `Submitted at: ${new Date().toISOString()}`
         });
 
-        console.log(
-            `Email notification sent for ${type}.`
-        );
+        console.log(`Email notification sent for ${type}.`);
 
         return true;
     } catch (error) {
-        /*
-           Email failure must NOT break
-           the contact form.
-        */
-
-        console.error(
-            'Email notification failed:',
-            error
-        );
-
+        console.error('SMTP email error:', error);
         return false;
     }
 }
 
-/* ==================================================
-   SPAM PROTECTION
-================================================== */
+// --------------------------------------------------
+// Validation / Anti-Spam
+// --------------------------------------------------
 
-function validate(
-    req,
-    res,
-    next
-) {
-    if (
-        req.body &&
-        req.body.website
-    ) {
-        return res
-            .status(400)
-            .json({
-                success: false,
-
-                message:
-                    'Spam detected.'
-            });
+function validate(req, res, next) {
+    if (req.body && req.body.website) {
+        return res.status(400).json({
+            success: false,
+            message: 'Spam detected.'
+        });
     }
 
     next();
 }
 
-/* ==================================================
-   CONTACT FORM
-================================================== */
+// --------------------------------------------------
+// Contact API
+// --------------------------------------------------
 
 app.post(
     '/api/contact',
     validate,
     async (req, res) => {
         try {
-            const data =
-                req.body || {};
+            const data = req.body || {};
 
-            /*
-               Save the submission.
-            */
-
-            await saveSubmission(
+            const record = await saveSubmission(
                 'contact',
                 data
             );
 
-            /*
-               Send email notification.
-               Email failure will NOT fail
-               the contact form.
-            */
+            const emailed = await notify(
+                'contact',
+                data
+            );
 
-            const emailed =
-                await notify(
-                    'contact',
-                    data
-                );
-
-            if (emailed) {
-                return res.json({
-                    success: true,
-
-                    message:
-                        'Message sent successfully. Email notification delivered.'
-                });
-            }
-
-            return res.json({
+            return res.status(200).json({
                 success: true,
-
-                message:
-                    'Message sent successfully. Email notification is currently unavailable.'
+                saved: true,
+                emailed: emailed,
+                message: emailed
+                    ? 'Message sent successfully. Email notification delivered.'
+                    : 'Message sent successfully. Email notification is currently unavailable.',
+                id: record.id
             });
+
         } catch (error) {
             console.error(
                 'CONTACT API ERROR:',
                 error
             );
 
-            /*
-               Always return valid JSON.
-            */
-
-            return res
-                .status(500)
-                .json({
-                    success: false,
-
-                    message:
-                        'Something went wrong while processing the message.'
-                });
+            return res.status(500).json({
+                success: false,
+                saved: false,
+                message:
+                    'Could not save the message.'
+            });
         }
     }
 );
 
-/* ==================================================
-   HIRE FORM
-================================================== */
+// --------------------------------------------------
+// Hire API
+// --------------------------------------------------
 
 app.post(
     '/api/hire',
     validate,
     async (req, res) => {
         try {
-            const data =
-                req.body || {};
+            const data = req.body || {};
 
-            await saveSubmission(
+            const record = await saveSubmission(
                 'hire',
                 data
             );
 
-            const emailed =
-                await notify(
-                    'hire',
-                    data
-                );
+            const emailed = await notify(
+                'hire',
+                data
+            );
 
-            if (emailed) {
-                return res.json({
-                    success: true,
-
-                    message:
-                        'Hiring request sent successfully. Email notification delivered.'
-                });
-            }
-
-            return res.json({
+            return res.status(200).json({
                 success: true,
-
-                message:
-                    'Hiring request sent successfully. Email notification is currently unavailable.'
+                saved: true,
+                emailed: emailed,
+                message: emailed
+                    ? 'Hiring request sent successfully. Email notification delivered.'
+                    : 'Hiring request saved successfully. Email notification is currently unavailable.',
+                id: record.id
             });
+
         } catch (error) {
             console.error(
                 'HIRE API ERROR:',
                 error
             );
 
-            return res
-                .status(500)
-                .json({
-                    success: false,
-
-                    message:
-                        'Something went wrong while processing the hiring request.'
-                });
+            return res.status(500).json({
+                success: false,
+                saved: false,
+                message:
+                    'Could not save the hiring request.'
+            });
         }
     }
 );
 
-/* ==================================================
-   ADMIN SUBMISSIONS
-================================================== */
+// --------------------------------------------------
+// Admin Submissions
+// --------------------------------------------------
 
 app.get(
     '/api/admin/submissions',
     async (req, res) => {
         try {
+            const adminKey =
+                process.env.ADMIN_KEY;
+
             if (
-                !process.env.ADMIN_KEY ||
-                req.query.key !==
-                    process.env.ADMIN_KEY
+                !adminKey ||
+                req.query.key !== adminKey
             ) {
-                return res
-                    .status(401)
-                    .json({
-                        success: false,
-
-                        message:
-                            'Invalid admin key.'
-                    });
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid admin key.'
+                });
             }
-
-            /*
-               Prefer MySQL if available.
-            */
 
             const database =
                 await getDatabase();
@@ -587,11 +376,7 @@ app.get(
                     const [rows] =
                         await database.query(
                             `
-                            SELECT
-                                id,
-                                type,
-                                created_at,
-                                payload
+                            SELECT *
                             FROM submissions
                             ORDER BY created_at DESC
                             LIMIT 200
@@ -600,183 +385,72 @@ app.get(
 
                     return res.json({
                         success: true,
-
-                        items:
-                            rows.map(
-                                (row) => ({
-                                    id:
-                                        row.id,
-
-                                    type:
-                                        row.type,
-
-                                    createdAt:
-                                        row.created_at,
-
-                                    data:
-                                        typeof row.payload ===
-                                        'string'
-                                            ? JSON.parse(
-                                                  row.payload
-                                              )
-                                            : row.payload
-                                })
-                            )
+                        items: rows.map(row => ({
+                            id: row.id,
+                            type: row.type,
+                            createdAt:
+                                row.created_at,
+                            data:
+                                typeof row.payload === 'string'
+                                    ? JSON.parse(row.payload)
+                                    : row.payload
+                        }))
                     });
                 } catch (error) {
                     console.error(
-                        'Admin MySQL read failed:',
+                        'Admin MySQL error:',
                         error
                     );
                 }
             }
 
-            /*
-               Fall back to local JSON.
-            */
-
-            const fileItems =
-                safeRead();
-
-            /*
-               Also include memory items
-               if file storage failed.
-            */
-
-            const combined = [
-                ...memorySubmissions,
-                ...fileItems
-            ];
-
-            /*
-               Remove duplicate IDs.
-            */
-
-            const unique =
-                Array.from(
-                    new Map(
-                        combined.map(
-                            (item) => [
-                                item.id,
-                                item
-                            ]
-                        )
-                    ).values()
-                );
-
             return res.json({
                 success: true,
-
-                items:
-                    unique.slice(
-                        0,
-                        200
-                    )
+                items: safeRead().slice(0, 200)
             });
+
         } catch (error) {
             console.error(
-                'ADMIN API ERROR:',
+                'Admin API error:',
                 error
             );
 
-            return res
-                .status(500)
-                .json({
-                    success: false,
-
-                    message:
-                        'Could not load submissions.'
-                });
+            return res.status(500).json({
+                success: false,
+                message:
+                    'Could not load submissions.'
+            });
         }
     }
 );
 
-/* ==================================================
-   HEALTH CHECK
-================================================== */
+// --------------------------------------------------
+// Health Check
+// --------------------------------------------------
 
 app.get(
     '/health',
     (req, res) => {
         res.json({
             success: true,
-
             ok: true,
-
             service:
                 'Manish Yadav Portfolio',
-
             timestamp:
                 new Date().toISOString()
         });
     }
 );
 
-/* ==================================================
-   404 API HANDLER
-================================================== */
-
-app.use(
-    '/api',
-    (req, res) => {
-        res
-            .status(404)
-            .json({
-                success: false,
-
-                message:
-                    'API endpoint not found.'
-            });
-    }
-);
-
-/* ==================================================
-   GLOBAL ERROR HANDLER
-================================================== */
-
-app.use(
-    (error, req, res, next) => {
-        console.error(
-            'GLOBAL SERVER ERROR:',
-            error
-        );
-
-        if (res.headersSent) {
-            return next(error);
-        }
-
-        res
-            .status(500)
-            .json({
-                success: false,
-
-                message:
-                    'Internal server error.'
-            });
-    }
-);
-
-/* ==================================================
-   START SERVER
-================================================== */
+// --------------------------------------------------
+// Start Server
+// --------------------------------------------------
 
 app.listen(
     PORT,
-    '0.0.0.0',
     () => {
         console.log(
             `Portfolio running on port ${PORT}`
-        );
-
-        console.log(
-            `Environment: ${
-                process.env.NODE_ENV ||
-                'development'
-            }`
-        );
-
-        console.log(
-            `Data directory: ${DATA_DIR}`
         );
     }
 );
